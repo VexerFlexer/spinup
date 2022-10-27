@@ -19,6 +19,14 @@
 #define FLYWHEEL_STEP_SIZE 25
 #define FLYWHEEL_THRESHOLD 0.05
 #define INTAKE_STEP_SIZE 20
+
+#define BUTTON_TRIPPLE_SHOT DIGITAL_X
+#define BUTTON_FLYWHEEL_DOWN DIGITAL_LEFT
+#define BUTTON_FLYWHEEL_UP DIGITAL_RIGHT
+#define BUTTON_FLYWHEEL_SET DIGITAL_L1
+#define BUTTON_FLYHWEEL_STOP DIGITAL_L2
+#define BUTTON_INDEXER DIGITAL_A
+
 using namespace pros;
 using namespace std;
 
@@ -39,6 +47,7 @@ int intake_status = 0;
 int intake_speed = INTAKE_DEFAULT_VELOCITY;
 bool indexer_status = false;
 int flywheel_spin = 0;
+int disk_counter = 0;
 shooter_state_t shooter_state = spinup; 
 
 auto time_start = std::chrono::system_clock::now();
@@ -74,7 +83,7 @@ void opcontrol() {
    right_back.move(right_joystick);
  
    //finished with tank drive
-   if (master.get_digital(DIGITAL_LEFT)) {
+   if (master.get_digital(BUTTON_FLYWHEEL_DOWN)) {
      if (!flywheel_down_pressed)
        flywheel_speed = std::max(flywheel_speed - FLYWHEEL_STEP_SIZE, 50);
      flywheel_down_pressed = true;
@@ -82,7 +91,7 @@ void opcontrol() {
      flywheel_down_pressed = false;
    }
  
-   if (master.get_digital(DIGITAL_RIGHT)) {
+   if (master.get_digital(BUTTON_FLYWHEEL_UP)) {
      if (!flywheel_up_pressed)
        flywheel_speed = std::min(flywheel_speed + FLYWHEEL_STEP_SIZE, 600);
      flywheel_up_pressed = true;
@@ -94,11 +103,11 @@ void opcontrol() {
    flywheel1.move(flywheel_spin * 127 / 600);
    flywheel2.move(flywheel_spin * 127 / 600);
  
-   if (master.get_digital(DIGITAL_L1)) {
+   if (master.get_digital(BUTTON_FLYWHEEL_SET)) {
      flywheel_spin = flywheel_speed;
    }
  
-   if (master.get_digital(DIGITAL_L2)) {
+   if (master.get_digital(BUTTON_FLYHWEEL_STOP)) {
      flywheel_spin = 0;
    }
  
@@ -130,39 +139,46 @@ void opcontrol() {
    } else {
      intake_up_pressed = false;
    }
- 
- 
-   if (intake_status==1) {
-     intake.move_velocity(100);
- 
-   }
-   if (intake_status==0) {
-     intake.move_velocity(0);
-   }
-   if (intake_status==-1) {
-     intake.move_velocity(-100);
-   }
 
-   //indexer
-   if(master.get_digital(DIGITAL_A)) {
+   // -1 reverse, 0 stop, 1 fwd
+   intake.move_velocity(intake_status * 100);
+
+   // indexer
+   // TODO: remove delay
+   if(master.get_digital(BUTTON_INDEXER)) {
      pros::delay(20);
      indexer.set_value(false);
    }
-   if(!master.get_digital(DIGITAL_A)) {
+   if(!master.get_digital(BUTTON_INDEXER)) {
      pros::delay(20);
      indexer.set_value(true);
    }
 
    switch(shooter_state) {
     case spinup: 
-      if (motor_threshold(flywheel1) && motor_threshold(flywheel2))
+      if (motor_threshold(flywheel1) && motor_threshold(flywheel2) && !master.get_digital(BUTTON_TRIPPLE_SHOT))
         shooter_state = ready;
       break;
     case ready:
+      // if motors slowed down go back to spinup
+      if (!(motor_threshold(flywheel1) && motor_threshold(flywheel2))) {
+        shooter_state = spinup;
+      } else if (master.get_digital(BUTTON_TRIPPLE_SHOT)) { // shoot
+        shooter_state = shooting;
+        disk_counter = 3;
+        // TODO: activate pneumatics
+      }
       break;
     case shooting:
+      disk_counter--;
+      // TODO: retract pneumatics
       break;
     case shot:
+      if (disk_counter == 0) {
+        shooter_state = spinup;
+      } else if (motor_threshold(flywheel1) && motor_threshold(flywheel2))
+        shooter_state = shooting;
+      }
       break;
    }
  
