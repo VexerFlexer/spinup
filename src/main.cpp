@@ -39,10 +39,6 @@ typedef enum {
 
 bool flywheel_status = false;
 int flywheel_speed = FLYWHEEL_DEFAULT_SPEED;
-bool flywheel_up_pressed = false;
-bool flywheel_down_pressed = false;
-bool intake_up_pressed = false;
-bool intake_down_pressed = false;
 int intake_status = 0;
 int intake_speed = INTAKE_DEFAULT_VELOCITY;
 bool indexer_status = false;
@@ -71,90 +67,67 @@ bool motor_threshold(pros::Motor & motor) {
 
 void opcontrol() {
  
- //expansion.set_value(true);
- master.clear();
+  //expansion.set_value(true);
+  master.clear();
  
- while (true) {
-   std::int8_t left_joystick = master.get_analog(ANALOG_LEFT_Y);
-   std::int8_t right_joystick = master.get_analog(ANALOG_RIGHT_Y);
-   left_back.move(left_joystick);
-   left_front.move(left_joystick);
-   right_front.move(right_joystick);
-   right_back.move(right_joystick);
- 
-   //finished with tank drive
-   if (master.get_digital(BUTTON_FLYWHEEL_DOWN)) {
-     if (!flywheel_down_pressed)
-       flywheel_speed = std::max(flywheel_speed - FLYWHEEL_STEP_SIZE, 50);
-     flywheel_down_pressed = true;
-   } else {
-     flywheel_down_pressed = false;
-   }
- 
-   if (master.get_digital(BUTTON_FLYWHEEL_UP)) {
-     if (!flywheel_up_pressed)
-       flywheel_speed = std::min(flywheel_speed + FLYWHEEL_STEP_SIZE, 600);
-     flywheel_up_pressed = true;
-   } else {
-     flywheel_up_pressed = false;
-   }
-    //flywheel_set(flywheel_spin,flywheel1,flywheel2);
-  
-   flywheel1.move(flywheel_spin * 127 / 600);
-   flywheel2.move(flywheel_spin * 127 / 600);
- 
-   if (master.get_digital(BUTTON_FLYWHEEL_SET)) {
-     flywheel_spin = flywheel_speed;
-   }
- 
-   if (master.get_digital(BUTTON_FLYHWEEL_STOP)) {
-     flywheel_spin = 0;
-   }
- 
-   //intake
-   if (master.get_digital(DIGITAL_R2)) {
-     if (!intake_down_pressed){
-       if (intake_status == -1){
-         intake_status = 0;
-       }
-       else if (intake_status == 0){
-         intake_status = -1;
-       }
-        intake_down_pressed = true;
-     }
- 
-   } else {
-     intake_down_pressed = false;
-   }
-   if (master.get_digital(DIGITAL_R1)) {
-     if (!intake_up_pressed){
-       if (intake_status == 1){
-         intake_status = 0;
-       }
-       else if (intake_status == 0){
-         intake_status = 1;
-       }
-       intake_up_pressed = true;
-     }
-   } else {
-     intake_up_pressed = false;
-   }
+  while (true) {
+    std::int8_t left_joystick = master.get_analog(ANALOG_LEFT_Y);
+    std::int8_t right_joystick = master.get_analog(ANALOG_RIGHT_Y);
+    left_back.move(left_joystick);
+    left_front.move(left_joystick);
+    right_front.move(right_joystick);
+    right_back.move(right_joystick);
 
-   // -1 reverse, 0 stop, 1 fwd
-   intake.move_velocity(intake_status * 100);
+    //finished with tank drive
+    if (master.get_digital_new_press(BUTTON_FLYWHEEL_DOWN)) {
+      flywheel_speed = std::max(flywheel_speed - FLYWHEEL_STEP_SIZE, 50);
+    }
 
-   // indexer
-   // TODO: remove delay
-   if(master.get_digital(BUTTON_INDEXER)) {
-     pros::delay(20);
-     indexer.set_value(false);
-   }
-   if(!master.get_digital(BUTTON_INDEXER)) {
-     pros::delay(20);
-     indexer.set_value(true);
-   }
+    if (master.get_digital_new_press(BUTTON_FLYWHEEL_UP)) {
+      flywheel_speed = std::min(flywheel_speed + FLYWHEEL_STEP_SIZE, 600);
+    }
 
-   switch(shooter_state) {
+    flywheel1.move(flywheel_spin * 127 / 600);
+    flywheel2.move(flywheel_spin * 127 / 600);
+
+    if (master.get_digital_new_press(BUTTON_FLYWHEEL_SET)) {
+      flywheel_spin = flywheel_speed;
+    }
+
+    if (master.get_digital_new_press(BUTTON_FLYHWEEL_STOP)) {
+      flywheel_spin = 0;
+    }
+
+    //intake
+    if (master.get_digital_new_press(DIGITAL_R2)) {
+      switch(intake_status) {
+        case 0: intake_status = -1; break;
+        case -1: intake_status = 0; break;
+      }
+    }
+
+    if (master.get_digital_new_press(DIGITAL_R1)) {
+      switch(intake_status) {
+        case 1: intake_status = 0; break;
+        case 0: intake_status = 1; break;
+      }
+    }
+
+    // -1 reverse, 0 stop, 1 fwd
+    intake.move_velocity(intake_status * 100);
+
+    // indexer
+    // TODO: remove delay
+    if(master.get_digital(BUTTON_INDEXER)) {
+      pros::delay(20);
+      indexer.set_value(false);
+    }
+    if(!master.get_digital(BUTTON_INDEXER)) {
+      pros::delay(20);
+      indexer.set_value(true);
+    }
+
+    switch(shooter_state) {
     case spinup: 
       if (motor_threshold(flywheel1) && motor_threshold(flywheel2) && !master.get_digital(BUTTON_TRIPPLE_SHOT))
         shooter_state = ready;
@@ -176,20 +149,19 @@ void opcontrol() {
     case shot:
       if (disk_counter == 0) {
         shooter_state = spinup;
-      } else if (motor_threshold(flywheel1) && motor_threshold(flywheel2))
+      } else if (motor_threshold(flywheel1) && motor_threshold(flywheel2)) {
         shooter_state = shooting;
       }
       break;
-   }
- 
-   master.print(0, 0, "%3d %3.0f %3.0f", flywheel_speed, 
-     flywheel1.get_actual_velocity(), flywheel2.get_actual_velocity());
-   master.print(1, 0, "delta: %3.0f %3.0f", flywheel1.get_target_velocity() - flywheel1.get_actual_velocity(),
+    }
+  
+    master.print(0, 0, "%3d %3.0f %3.0f", flywheel_speed, 
+      flywheel1.get_actual_velocity(), flywheel2.get_actual_velocity());
+    master.print(1, 0, "delta: %3.0f %3.0f", flywheel1.get_target_velocity() - flywheel1.get_actual_velocity(),
     flywheel2.get_target_velocity() - flywheel2.get_actual_velocity());
- 
-   pros::delay(2);
- 
- }
+
+    pros::delay(2);
+  }
 }
  
  
