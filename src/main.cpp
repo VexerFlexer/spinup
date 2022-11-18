@@ -2,6 +2,7 @@
 #include "pros/misc.h"
 #include "pros/motors.h"
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <type_traits>
  
@@ -14,21 +15,23 @@
 #define INTAKE_PORT1 2
 // #define INTAKE_PORT2 20
 #define INDEXER_PORT 'H'
-#define INTAKE_DEFAULT_VELOCITY 350
-#define FLYWHEEL_DEFAULT_SPEED 400
+#define INDEXER_PORT2 'G'
+#define INTAKE_DEFAULT_VELOCITY 375
+#define FLYWHEEL_DEFAULT_SPEED 350
 #define FLYWHEEL_STEP_SIZE 25
-#define FLYWHEEL_THRESHOLD 0.05
+#define FLYWHEEL_THRESHOLD 0.10
 #define INTAKE_STEP_SIZE 20
-
+#define SHOOTING_TIME_MS 100
+#define EXPANSION_PORT 'F'
 #define BUTTON_TRIPPLE_SHOT DIGITAL_X
 #define BUTTON_FLYWHEEL_DOWN DIGITAL_LEFT
 #define BUTTON_FLYWHEEL_UP DIGITAL_RIGHT
 #define BUTTON_FLYWHEEL_SET DIGITAL_L1
-#define BUTTON_FLYHWEEL_STOP DIGITAL_L2
-#define BUTTON_INDEXER DIGITAL_A
+#define BUTTON_INDEXER DIGITAL_L2
 
 using namespace pros;
 using namespace std;
+using namespace std::chrono;
 
 typedef enum { 
   spinup,
@@ -44,6 +47,10 @@ int intake_speed = INTAKE_DEFAULT_VELOCITY;
 bool indexer_status = false;
 int flywheel_spin = 0;
 int disk_counter = 0;
+int line = 0;
+long timediff = 0;
+
+system_clock::time_point indexer_time =  system_clock::now();
 shooter_state_t shooter_state = spinup; 
 
 auto time_start = std::chrono::system_clock::now();
@@ -54,10 +61,12 @@ pros::Motor right_front (RIGHT_FRONT_PORT, true); // reversed
 
 pros::Motor flywheel1 (FLYWHEEL_PORT, MOTOR_GEARSET_06,true);
 pros::Motor flywheel2 (FLYWHEEL_PORT2, MOTOR_GEARSET_06,false);
-pros::Motor intake (INTAKE_PORT1, MOTOR_GEARSET_06);
-//pros::ADIDigitalOut expansion (EXPANSION_PORT);
+pros::Motor intake (INTAKE_PORT1, MOTOR_GEARSET_06, true);
+
 //pros::ADIDigitalOut expansion2 (EXPANSION_PORT2);
 pros::ADIDigitalOut indexer (INDEXER_PORT);
+pros::ADIDigitalOut indexer2 (INDEXER_PORT2);
+pros::ADIDigitalOut expansion (EXPANSION_PORT);
 //pros::ADIDigitalOut blocker (BLOCKER_PORT);
 pros::Controller master (CONTROLLER_MASTER);
 
@@ -65,8 +74,60 @@ bool motor_threshold(pros::Motor & motor) {
   return abs(1.0 - motor.get_actual_velocity() / (double)motor.get_target_velocity()) < FLYWHEEL_THRESHOLD;
 }
 
+
+
+void setIndexer(bool expand) {
+  indexer.set_value(expand);
+  indexer2.set_value(!expand);
+  indexer_time = system_clock::now();
+}
+
+
+
+void update_display() {
+  switch(line) {
+    case 0: if (master.print(line, 0, "%3d %3.0f %3.0f", flywheel_speed, 
+        flywheel1.get_actual_velocity(), flywheel2.get_actual_velocity()) == 1)
+          line ++;
+        break;
+    case 1: if (master.print(line, 0, "delta: %3.0f %3.0wf", flywheel1.get_target_velocity() - flywheel1.get_actual_velocity(),
+      flywheel2.get_target_velocity() - flywheel2.get_actual_velocity()) == 1)
+        line++;
+      break;
+    case 2: if (master.print(line, 0, "STATE: %d, %d, %d, %d",
+      shooter_state, motor_threshold(flywheel1), motor_threshold(flywheel2), timediff) == 1)
+      line++;
+    break;
+  }
+  line = line % 3;
+}
+void pid_tuning() {
+  double target_velocity = 75;
+  double kP = 10;
+  double kI = 0;
+  double kD = 0;
+  double derivative = 0;
+  double integral = 0;
+  double prev_error = 400;
+  while(true) {
+    double error = target_velocity*2 - (flywheel1.get_actual_velocity() + flywheel2.get_actual_velocity());
+    integral = integral + error;
+    derivative = error - prev_error;
+    prev_error = error;
+    auto new_velocity = (error*kP + integral*kI + derivative*kD);
+    flywheel1.move(new_velocity);
+    flywheel2.move(new_velocity);
+    update_display();
+    pros::delay(15);
+  }
+}
+
 void opcontrol() {
- 
+  expansion.set_value(false);
+  if (master.get_digital_new_press(DIGITAL_Y)){
+    pid_tuning();
+  }
+
   //expansion.set_value(true);
   master.clear();
  
@@ -91,11 +152,11 @@ void opcontrol() {
     flywheel2.move(flywheel_spin * 127 / 600);
 
     if (master.get_digital_new_press(BUTTON_FLYWHEEL_SET)) {
-      flywheel_spin = flywheel_speed;
-    }
-
-    if (master.get_digital_new_press(BUTTON_FLYHWEEL_STOP)) {
-      flywheel_spin = 0;
+      if (flywheel_spin==0){
+        flywheel_spin = flywheel_speed;
+      }else{
+        flywheel_spin = 0;
+      }
     }
 
     //intake
@@ -114,17 +175,24 @@ void opcontrol() {
     }
 
     // -1 reverse, 0 stop, 1 fwd
-    intake.move_velocity(intake_status * 100);
+    intake.move_velocity(intake_status * INTAKE_DEFAULT_VELOCITY);
 
-    // indexer
-    // TODO: remove delay
-    if(master.get_digital(BUTTON_INDEXER)) {
-      pros::delay(20);
-      indexer.set_value(false);
+    // indexer, only set if not in auto-shooting state
+    if (shooter_state == spinup || shooter_state == ready) {
+      if(master.get_digital(BUTTON_INDEXER)) {
+        pros::delay(20);
+        indexer.set_value(true);
+        indexer2.set_value(false);
+      }
+      if(!master.get_digital(BUTTON_INDEXER)) {
+        pros::delay(20);
+        indexer.set_value(false);
+        indexer2.set_value(true);
+      }
     }
-    if(!master.get_digital(BUTTON_INDEXER)) {
-      pros::delay(20);
-      indexer.set_value(true);
+    //expansion
+    if (master.get_digital_new_press(DIGITAL_B)){
+      expansion.set_value(true);
     }
 
     switch(shooter_state) {
@@ -139,14 +207,20 @@ void opcontrol() {
       } else if (master.get_digital(BUTTON_TRIPPLE_SHOT)) { // shoot
         shooter_state = shooting;
         disk_counter = 3;
-        // TODO: activate pneumatics
+        setIndexer(true);
       }
       break;
-    case shooting:
-      disk_counter--;
-      // TODO: retract pneumatics
-      break;
+    case shooting: {
+        timediff = chrono::duration_cast<chrono::milliseconds>(
+          system_clock::now().time_since_epoch() - indexer_time.time_since_epoch()).count();
+        if (timediff > SHOOTING_TIME_MS) {
+          disk_counter--;
+          setIndexer(false);
+          shooter_state = shot;
+        }
+      } break;
     case shot:
+      setIndexer(false);
       if (disk_counter == 0) {
         shooter_state = spinup;
       } else if (motor_threshold(flywheel1) && motor_threshold(flywheel2)) {
@@ -155,10 +229,7 @@ void opcontrol() {
       break;
     }
   
-    master.print(0, 0, "%3d %3.0f %3.0f", flywheel_speed, 
-      flywheel1.get_actual_velocity(), flywheel2.get_actual_velocity());
-    master.print(1, 0, "delta: %3.0f %3.0f", flywheel1.get_target_velocity() - flywheel1.get_actual_velocity(),
-    flywheel2.get_target_velocity() - flywheel2.get_actual_velocity());
+    update_display();
 
     pros::delay(2);
   }
