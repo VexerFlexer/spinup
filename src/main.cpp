@@ -17,6 +17,7 @@
 #define INDEXER_PORT 'H'
 #define INDEXER_PORT2 'G'
 #define INTAKE_DEFAULT_VELOCITY 375
+#define INTAKE_SLOW_VELOCITY 150
 #define FLYWHEEL_DEFAULT_SPEED 350
 #define FLYWHEEL_STEP_SIZE 25
 #define FLYWHEEL_THRESHOLD 0.10
@@ -41,6 +42,7 @@ typedef enum {
 } shooter_state_t;
 
 bool flywheel_status = false;
+bool intake_slow = false;
 int flywheel_speed = FLYWHEEL_DEFAULT_SPEED;
 int intake_status = 0;
 int intake_speed = INTAKE_DEFAULT_VELOCITY;
@@ -50,18 +52,20 @@ int disk_counter = 0;
 int line = 0;
 long timediff = 0;
 
+
 system_clock::time_point indexer_time =  system_clock::now();
 shooter_state_t shooter_state = spinup; 
 
 auto time_start = std::chrono::system_clock::now();
 pros::Motor left_back (LEFT_BACK_PORT,true);
-pros::Motor left_front (LEFT_FRONT_PORT);
-pros::Motor right_back (RIGHT_BACK_PORT);
+pros::Motor left_front (LEFT_FRONT_PORT,pros::motor_brake_mode_e());
+pros::Motor right_back (RIGHT_BACK_PORT,pros::motor_brake_mode_e());
 pros::Motor right_front (RIGHT_FRONT_PORT, true); // reversed
 
 pros::Motor flywheel1 (FLYWHEEL_PORT, MOTOR_GEARSET_06,true);
 pros::Motor flywheel2 (FLYWHEEL_PORT2, MOTOR_GEARSET_06,false);
 pros::Motor intake (INTAKE_PORT1, MOTOR_GEARSET_06, true);
+//pros::Motor indexer (INDEXER, MOTOR_GEARSET_06);
 
 //pros::ADIDigitalOut expansion2 (EXPANSION_PORT2);
 pros::ADIDigitalOut indexer (INDEXER_PORT);
@@ -73,6 +77,12 @@ pros::Controller master (CONTROLLER_MASTER);
 bool motor_threshold(pros::Motor & motor) {
   return abs(1.0 - motor.get_actual_velocity() / (double)motor.get_target_velocity()) < FLYWHEEL_THRESHOLD;
 }
+int get_intake_speed(int intake_status){
+  if (intake_slow){
+    return INTAKE_SLOW_VELOCITY*intake_status;
+  }else
+    return INTAKE_DEFAULT_VELOCITY * intake_status;
+}
 
 
 
@@ -81,7 +91,6 @@ void setIndexer(bool expand) {
   indexer2.set_value(!expand);
   indexer_time = system_clock::now();
 }
-
 
 
 void update_display() {
@@ -121,7 +130,24 @@ void pid_tuning() {
     pros::delay(15);
   }
 }
+void autonomous(){
+  left_back.move(40);
+  left_front.move(40);
+  right_front.move(40);
+  right_back.move(40);
+  pros::delay(1000);
 
+  intake.move(-150);
+  pros::delay(100);
+  intake.move_velocity(0);
+  left_back.move(0);
+  left_front.move(0);
+  right_front.move(0);
+  right_back.move(0);
+  //turn to goal
+
+
+}
 void opcontrol() {
   expansion.set_value(false);
   if (master.get_digital_new_press(DIGITAL_Y)){
@@ -129,8 +155,14 @@ void opcontrol() {
   }
 
   //expansion.set_value(true);
+  //auton try
+
   master.clear();
- 
+
+  left_back.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
+  left_front.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
+  right_back.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
+  right_front.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
   while (true) {
     std::int8_t left_joystick = master.get_analog(ANALOG_LEFT_Y);
     std::int8_t right_joystick = master.get_analog(ANALOG_RIGHT_Y);
@@ -138,7 +170,6 @@ void opcontrol() {
     left_front.move(left_joystick);
     right_front.move(right_joystick);
     right_back.move(right_joystick);
-
     //finished with tank drive
     if (master.get_digital_new_press(BUTTON_FLYWHEEL_DOWN)) {
       flywheel_speed = std::max(flywheel_speed - FLYWHEEL_STEP_SIZE, 50);
@@ -173,9 +204,17 @@ void opcontrol() {
         case 0: intake_status = 1; break;
       }
     }
+    
 
     // -1 reverse, 0 stop, 1 fwd
-    intake.move_velocity(intake_status * INTAKE_DEFAULT_VELOCITY);
+
+    intake.move_velocity(get_intake_speed(intake_status));
+    //rotate intake slowly
+    if (master.get_digital_new_press(DIGITAL_A)) {
+      intake_slow = !intake_slow;
+    }
+
+
 
     // indexer, only set if not in auto-shooting state
     if (shooter_state == spinup || shooter_state == ready) {
@@ -228,7 +267,6 @@ void opcontrol() {
       }
       break;
     }
-  
     update_display();
 
     pros::delay(2);
