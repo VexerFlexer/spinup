@@ -75,6 +75,11 @@ void opcontrol(void);
 /**
  * You can add C++-only headers here
  */
+#include "subsystemHeaders/drive.hpp"
+#include "subsystemHeaders/flywheel.hpp"
+#include "subsystemHeaders/globals.hpp"
+#include "subsystemHeaders/intake.hpp"
+#include "subsystemHeaders/drive.hpp"
 //#include <iostream>
 #endif
 
